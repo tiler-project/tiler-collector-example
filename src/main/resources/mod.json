@@ -1,0 +1,21 @@
+{
+  "main":"io.tiler.collectors.example.ExampleCollectorVerticle",
+
+  "description":"Example collector for the Tiler dashboard framework",
+  "licenses": ["MIT"],
+  "author": "Simon Dean",
+
+  "developers": [],
+  "keywords": [
+    "dashboard",
+    "information",
+    "radiator",
+    "react",
+    "vert.x",
+    "example"
+  ],
+  "homepage": "https://github.com/tiler-project/tiler-collector-example",
+
+  "auto-redeploy": true,
+  "includes": "io.tiler~tiler~0.1.7,org.simondean.vertx~vertx-async~0.1.1"
+}
