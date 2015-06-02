@@ -1,30 +1,26 @@
 package io.tiler.collectors.example.config;
 
-import io.tiler.time.TimePeriodParser;
+import java.util.List;
 
 public class Config {
-  private final long collectionIntervalInMilliseconds;
   private final String metricNamePrefix;
+  private final List<Metric> metrics;
 
-  public Config(String collectionInterval, String metricNamePrefix) {
-    if (collectionInterval == null) {
-      collectionInterval = "10s";
-    }
-
+  public Config(String metricNamePrefix, List<Metric> metrics) {
     if (metricNamePrefix == null) {
       metricNamePrefix = "examples.";
     }
 
-    this.collectionIntervalInMilliseconds = TimePeriodParser.parseTimePeriodToMilliseconds(collectionInterval);
     this.metricNamePrefix = metricNamePrefix;
-  }
-
-  public long collectionIntervalInMilliseconds() {
-    return collectionIntervalInMilliseconds;
+    this.metrics = metrics;
   }
 
   public String metricNamePrefix() {
     return metricNamePrefix;
+  }
+
+  public List<Metric> metrics() {
+    return metrics;
   }
 
   public String getFullMetricName(String metricName) {

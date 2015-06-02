@@ -53,8 +53,8 @@
     <vertx.version>2.1.5</vertx.version>
     <vertx.testtools.version>2.0.3-final</vertx.testtools.version>
     <junit.version>4.11</junit.version>
-    <tiler.version>0.1.8</tiler.version>
-    <vertx-async.version>0.1.2</vertx-async.version>
+    <tiler-core.version>0.1.0</tiler-core.version>
+    <vertx-async.version>0.1.5</vertx-async.version>
 
     <!--Plugin versions-->
     <maven.compiler.plugin.version>3.0</maven.compiler.plugin.version>
@@ -91,8 +91,8 @@
     <!--Dependencies provided by included Vert.x modules-->
     <dependency>
       <groupId>io.tiler</groupId>
-      <artifactId>tiler</artifactId>
-      <version>${tiler.version}</version>
+      <artifactId>tiler-core</artifactId>
+      <version>${tiler-core.version}</version>
       <scope>provided</scope>
     </dependency>
     <dependency>

@@ -1,11 +1,14 @@
 package io.tiler.collectors.example;
 
-import io.tiler.BaseCollectorVerticle;
+import io.tiler.core.BaseCollectorVerticle;
 import io.tiler.collectors.example.config.Config;
 import io.tiler.collectors.example.config.ConfigFactory;
-import io.tiler.json.JsonArrayIterable;
+import io.tiler.collectors.example.config.Metric;
+import io.tiler.collectors.example.config.RandomIntField;
+import io.tiler.core.json.JsonArrayIterable;
 import org.simondean.vertx.async.Async;
 import org.simondean.vertx.async.DefaultAsyncResult;
+import org.simondean.vertx.async.ObjectWrapper;
 import org.vertx.java.core.AsyncResultHandler;
 import org.vertx.java.core.json.JsonArray;
 import org.vertx.java.core.json.JsonObject;
@@ -23,97 +26,113 @@ public class ExampleCollectorVerticle extends BaseCollectorVerticle {
     config = new ConfigFactory().load(container.config());
     random = new Random();
 
-    final boolean[] isRunning = {true};
+    Async.iterable(config.metrics())
+      .each((metricConfig, handler) -> {
+        String metricName = config.getFullMetricName(metricConfig.name());
+        logger.info("Configuring collection for metric '" + metricName + "'");
+        final ObjectWrapper<Boolean> isRunning = new ObjectWrapper<>(true);
 
-    collect(aVoid -> isRunning[0] = false);
+        vertx.runOnContext(aVoid -> collect(metricName, metricConfig, result -> isRunning.setObject(false)));
 
-    vertx.setPeriodic(config.collectionIntervalInMilliseconds(), aLong -> {
-      if (isRunning[0]) {
-        logger.info("Collection aborted as previous run still executing");
-        return;
-      }
+        vertx.setPeriodic(metricConfig.collectionIntervalInMilliseconds(), timerID -> {
+          if (isRunning.getObject()) {
+            logger.warn("Collection aborted as previous run still executing");
+            return;
+          }
 
-      isRunning[0] = true;
+          isRunning.setObject(true);
 
-      collect(aVoid -> isRunning[0] = false);
-    });
-
-    logger.info("ExampleCollectorVerticle started");
+          collect(metricName, metricConfig, result -> isRunning.setObject(false));
+        });
+      })
+      .run(vertx, result -> logger.info("ExampleCollectorVerticle started"));
   }
 
-  private void collect(AsyncResultHandler<Void> handler) {
-    logger.info("Collection started");
+  private void collect(String metricName, Metric metricConfig, AsyncResultHandler<Void> handler) {
+    long timeInMicroseconds = currentTimeInMicroseconds();
+    logger.info("Collection started for metric '" + metricName + "'");
+
     Async.waterfall()
-      .<HashMap<String, JsonObject>>task(taskHandler -> getExistingMetrics(taskHandler))
-      .<JsonArray>task((existingMetrics, taskHandler) -> getMetrics(existingMetrics, taskHandler))
-      .<Void>task((metrics, taskHandler) -> {
-        saveMetrics(metrics);
+      .<JsonObject>task(taskHandler -> getExistingMetric(timeInMicroseconds, metricConfig, metricName, taskHandler))
+      .<JsonObject>task((existingMetric, taskHandler) -> getMetric(timeInMicroseconds, metricConfig, metricName, existingMetric, taskHandler))
+      .<Void>task((metric, taskHandler) -> {
+        saveMetrics(new JsonArray().addObject(metric));
         taskHandler.handle(DefaultAsyncResult.succeed());
       })
       .run(result -> {
         if (result.failed()) {
+          logger.error("Collection failed");
           handler.handle(DefaultAsyncResult.fail(result));
           return;
         }
 
         logger.info("Collection finished");
-        handler.handle(null);
+        handler.handle(DefaultAsyncResult.succeed());
       });
   }
 
-  private void getExistingMetrics(AsyncResultHandler<HashMap<String, JsonObject>> handler) {
-    List<String> metricNames = getMetricNames();
-
-    getExistingMetrics(metricNames, result -> {
+  private void getExistingMetric(long timeInMicroseconds, Metric metricConfig, String metricName, AsyncResultHandler<JsonObject> handler) {
+    getExistingMetrics(Arrays.asList(metricName), result -> {
       if (result.failed()) {
         handler.handle(DefaultAsyncResult.fail(result));
         return;
       }
 
       JsonArray existingMetrics = result.result();
-      HashMap<String, JsonObject> existingMetricMap = new HashMap<>();
 
       for (JsonObject metric : new JsonArrayIterable<JsonObject>(existingMetrics)) {
-        existingMetricMap.put(metric.getString("name"), metric);
+        if (metric.getString("name").equals(metricName)) {
+          applyRetentionPeriod(timeInMicroseconds, metric, metricConfig);
+          handler.handle(DefaultAsyncResult.succeed(metric));
+          return;
+        }
       }
 
-      handler.handle(DefaultAsyncResult.succeed(existingMetricMap));
+      handler.handle(DefaultAsyncResult.succeed(null));
     });
   }
 
-  private List<String> getMetricNames() {
-    return Arrays.asList(config.getFullMetricName("1"));
+  private void applyRetentionPeriod(long timeInMicroseconds, JsonObject metric, Metric metricConfig) {
+    long retainFromTimeInMicroseconds = timeInMicroseconds - metricConfig.retentionPeriodInMicroseconds();
+
+    for (Iterator<JsonObject> iterator = new JsonArrayIterable<JsonObject>(metric.getArray("points")).iterator(); iterator.hasNext();) {
+      JsonObject point = iterator.next();
+
+      if (point.getLong("time") < retainFromTimeInMicroseconds) {
+        iterator.remove();
+      }
+    }
   }
 
-  private void getMetrics(HashMap<String, JsonObject> existingMetricMap, AsyncResultHandler<JsonArray> handler) {
-    long timeInMicroseconds = currentTimeInMicroseconds();
-
-    JsonArray metrics = new JsonArray()
-      .addObject(getMetric1(timeInMicroseconds, existingMetricMap));
-
-    handler.handle(DefaultAsyncResult.succeed(metrics));
-  }
-
-  private JsonObject getMetric1(long timeInMicroseconds, HashMap<String, JsonObject> existingMetricMap) {
-    String metricName = config.getFullMetricName("1");
-    JsonObject metric = existingMetricMap.get(metricName);
-
+  private void getMetric(long timeInMicroseconds, Metric metricConfig, String metricName, JsonObject metric, AsyncResultHandler<JsonObject> handler) {
     if (metric == null) {
       metric = new JsonObject()
         .putString("name", metricName)
         .putArray("points", new JsonArray());
     }
 
-    final JsonObject finalMetric = metric;
+    final JsonArray points = metric.getArray("points");
 
-    Arrays.asList("one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten").forEach(name -> {
-      finalMetric.getArray("points")
-        .addObject(new JsonObject()
-          .putNumber("time", timeInMicroseconds)
-          .putString("name", name)
-          .putNumber("value", random.nextInt(101)));
+    metricConfig.groups().forEach(group -> {
+      JsonObject point = group.copy()
+        .putNumber("time", timeInMicroseconds);
+
+      metricConfig.fields().forEach(fieldConfig -> {
+        if (fieldConfig instanceof RandomIntField) {
+          RandomIntField randomIntFieldConfig = (RandomIntField) fieldConfig;
+          point.putNumber(fieldConfig.name(), generateRandomInt(randomIntFieldConfig.min(), randomIntFieldConfig.max()));
+        } else {
+          logger.error("Unsupported field config type '" + fieldConfig.getClass().getName() + "'");
+        }
+      });
+
+      points.addObject(point);
     });
 
-    return metric;
+    handler.handle(DefaultAsyncResult.succeed(metric));
+  }
+
+  private int generateRandomInt(int min, int max) {
+    return random.nextInt(max - min + 1) + min;
   }
 }
